@@ -1,4 +1,4 @@
-name: Deploy apuestas-service
+name: Deploy casino-backend
 
 on:
   push:
@@ -10,73 +10,77 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        pip install -r requirements.txt
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-    - name: Run tests
-      run: |
-        pytest || true
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-        aws-region: ${{ secrets.AWS_REGION }}
+      - name: Run unit tests
+        run: npm test
 
-    - name: Login Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-    - name: Build Docker image
-      run: |
-        docker build \
-        -t apuestas-service:${{ github.sha }} .
+      - name: Login Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Tag Docker image
-      run: |
-        docker tag apuestas-service:${{ github.sha }} \
-        ${{ steps.login-ecr.outputs.registry }}/apuestas-service:${{ github.sha }}
-        docker tag apuestas-service:${{ github.sha }} \
-        ${{ steps.login-ecr.outputs.registry }}/apuestas-service:latest
-        docker tag apuestas-service:${{ github.sha }} \
-        ${{ steps.login-ecr.outputs.registry }}/apuestas-service:v1.0.0
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t casino-backend:${{ github.sha }} .
 
-    - name: Push Docker image
-      run: |
-        docker push \
-        ${{ steps.login-ecr.outputs.registry }}/apuestas-service:${{ github.sha }}
-        docker push \
-        ${{ steps.login-ecr.outputs.registry }}/apuestas-service:latest
-        docker push \
-        ${{ steps.login-ecr.outputs.registry }}/apuestas-service:v1.0.0
+      - name: Tag Docker image
+        run: |
+          docker tag casino-backend:${{ github.sha }} \
+          ${{ steps.login-ecr.outputs.registry }}/casino-backend:${{ github.sha }}
 
-    - name: Configure kubeconfig
-      run: |
-        aws eks update-kubeconfig \
-        --name ${{ secrets.EKS_CLUSTER }} \
-        --region ${{ secrets.AWS_REGION }}
+          docker tag casino-backend:${{ github.sha }} \
+          ${{ steps.login-ecr.outputs.registry }}/casino-backend:latest
 
-    - name: Create Kubernetes Secret
-      run: |
-        kubectl create secret generic casino-secrets \
-        --from-literal=DB_URL='${{ secrets.DB_URL }}' \
-        --from-literal=DB_USER='${{ secrets.DB_USER }}' \
-        --from-literal=DB_PASSWORD='${{ secrets.DB_PASSWORD }}' \
-        --from-literal=JWT_SECRET='${{ secrets.JWT_SECRET }}' \
-        --dry-run=client -o yaml | kubectl apply -f -
+          docker tag casino-backend:${{ github.sha }} \
+          ${{ steps.login-ecr.outputs.registry }}/casino-backend:v1.0.0
 
-    - name: Deploy apuestas
-      run: |
-        kubectl apply -f kubernetes/
-        kubectl rollout restart deployment/apuestas-service
+      - name: Push Docker image
+        run: |
+          docker push \
+          ${{ steps.login-ecr.outputs.registry }}/casino-backend:${{ github.sha }}
+
+          docker push \
+          ${{ steps.login-ecr.outputs.registry }}/casino-backend:latest
+
+          docker push \
+          ${{ steps.login-ecr.outputs.registry }}/casino-backend:v1.0.0
+
+      - name: Configure kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ secrets.EKS_CLUSTER }} \
+            --region ${{ secrets.AWS_REGION }}
+
+      - name: Create Kubernetes Secret
+        run: |
+          kubectl create secret generic casino-secrets \
+            --from-literal=DB_URL='${{ secrets.DB_URL }}' \
+            --from-literal=DB_USER='${{ secrets.DB_USER }}' \
+            --from-literal=DB_PASSWORD='${{ secrets.DB_PASSWORD }}' \
+            --from-literal=JWT_SECRET='${{ secrets.JWT_SECRET }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy backend to EKS
+        run: |
+          kubectl apply -f kubernetes/
+          kubectl rollout restart deployment/casino-backend
+          kubectl rollout status deployment/casino-backend
